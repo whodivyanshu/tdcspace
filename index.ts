@@ -6,7 +6,7 @@ import path from 'path';
 import serveIndex from 'serve-index';
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
@@ -22,7 +22,7 @@ app.post('/generate-pdf', async (req: Request, res: Response) => {
     const filepath = path.join(__dirname, 'pdfs', filename);
 
     const browser = await puppeteer.launch({
-      headless: true,
+      headless: "new",
       args: ['--no-sandbox', '--disable-setuid-sandbox'],
     });
 
