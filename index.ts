@@ -8,6 +8,13 @@ import serveIndex from 'serve-index';
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Ensure pdfs directory exists
+const pdfsDir = path.join(__dirname, 'pdfs');
+if (!fs.existsSync(pdfsDir)) {
+  fs.mkdirSync(pdfsDir, { recursive: true });
+  console.log('Created pdfs directory');
+}
+
 app.use(cors());
 app.use(express.json());
 app.use('/pdfs', express.static(path.join(__dirname, 'pdfs')));
@@ -23,7 +30,16 @@ app.post('/generate-pdf', async (req: Request, res: Response) => {
 
     const browser = await puppeteer.launch({
       headless: "new",
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--no-first-run',
+        '--no-zygote',
+        '--single-process',
+        '--disable-gpu'
+      ],
     });
 
     const pageObj = await browser.newPage();
@@ -49,12 +65,33 @@ app.post('/generate-pdf', async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('Error generating PDF:', error);
-    res.status(500).send('Failed to generate PDF');
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const errorStack = error instanceof Error ? error.stack : undefined;
+    
+    console.error('Error stack:', errorStack);
+    console.error('Error message:', errorMessage);
+    res.status(500).json({
+      error: 'Failed to generate PDF',
+      message: errorMessage,
+      ...(process.env.NODE_ENV !== 'production' && errorStack && { stack: errorStack })
+    });
   }
 });
 
 app.get('/', (req: Request, res: Response) => {
-  res.send('Hello World');
+  res.json({ 
+    message: 'PDF Generation API is running',
+    status: 'healthy',
+    timestamp: new Date().toISOString()
+  });
+});
+
+app.get('/health', (req: Request, res: Response) => {
+  res.json({ 
+    status: 'healthy',
+    service: 'PDF Generation API',
+    timestamp: new Date().toISOString()
+  });
 });
 
 app.listen(PORT, () => {
