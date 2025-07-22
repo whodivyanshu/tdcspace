@@ -13,12 +13,19 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
-const puppeteer_1 = __importDefault(require("puppeteer"));
+const pdfkit_1 = __importDefault(require("pdfkit"));
+const fs_1 = __importDefault(require("fs"));
 const cors_1 = __importDefault(require("cors"));
 const path_1 = __importDefault(require("path"));
 const serve_index_1 = __importDefault(require("serve-index"));
 const app = (0, express_1.default)();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
+// Ensure pdfs directory exists
+const pdfsDir = path_1.default.join(__dirname, 'pdfs');
+if (!fs_1.default.existsSync(pdfsDir)) {
+    fs_1.default.mkdirSync(pdfsDir, { recursive: true });
+    console.log('Created pdfs directory');
+}
 app.use((0, cors_1.default)());
 app.use(express_1.default.json());
 app.use('/pdfs', express_1.default.static(path_1.default.join(__dirname, 'pdfs')));
@@ -26,27 +33,30 @@ app.use('/pdfs', (0, serve_index_1.default)(path_1.default.join(__dirname, 'pdfs
 app.post('/generate-pdf', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { content, page } = req.body;
-        const html = generateHTML(content, page);
         const filename = `Page-${page}.pdf`;
         const filepath = path_1.default.join(__dirname, 'pdfs', filename);
-        const browser = yield puppeteer_1.default.launch({
-            headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        // Create a new PDF document
+        const doc = new pdfkit_1.default({
+            size: 'A4',
+            margins: {
+                top: 85, // 30mm
+                bottom: 57, // 20mm
+                left: 57, // 20mm
+                right: 57 // 20mm
+            }
         });
-        const pageObj = yield browser.newPage();
-        yield pageObj.setContent(html, { waitUntil: 'networkidle0' });
-        yield pageObj.pdf({
-            path: filepath,
-            format: 'A4',
-            printBackground: true,
-            margin: {
-                top: '30mm',
-                bottom: '20mm',
-                left: '20mm',
-                right: '20mm',
-            },
+        // Pipe the PDF to a write stream
+        const stream = fs_1.default.createWriteStream(filepath);
+        doc.pipe(stream);
+        // Add content to PDF
+        generatePDF(doc, content, page);
+        // Finalize the PDF
+        doc.end();
+        // Wait for the stream to finish writing
+        yield new Promise((resolve, reject) => {
+            stream.on('finish', resolve);
+            stream.on('error', reject);
         });
-        yield browser.close();
         res.status(200).json({
             message: `PDF generated for Page ${page}`,
             fileUrl: `http://localhost:${PORT}/pdfs/${filename}`,
@@ -54,58 +64,62 @@ app.post('/generate-pdf', (req, res) => __awaiter(void 0, void 0, void 0, functi
     }
     catch (error) {
         console.error('Error generating PDF:', error);
-        res.status(500).send('Failed to generate PDF');
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        const errorStack = error instanceof Error ? error.stack : undefined;
+        console.error('Error stack:', errorStack);
+        console.error('Error message:', errorMessage);
+        res.status(500).json(Object.assign({ error: 'Failed to generate PDF', message: errorMessage }, (process.env.NODE_ENV !== 'production' && errorStack && { stack: errorStack })));
     }
 }));
 app.get('/', (req, res) => {
-    res.send('Hello World');
+    res.json({
+        message: 'PDF Generation API is running',
+        status: 'healthy',
+        timestamp: new Date().toISOString()
+    });
+});
+app.get('/health', (req, res) => {
+    res.json({
+        status: 'healthy',
+        service: 'PDF Generation API',
+        timestamp: new Date().toISOString()
+    });
 });
 app.listen(PORT, () => {
     console.log(`✅ PDF API running at http://localhost:${PORT}`);
 });
-function generateHTML(content, pageNumber) {
-    return `
-  <!DOCTYPE html>
-  <html>
-    <head>
-      <title>DayOnes | Page ${pageNumber}</title>
-      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
-      <style>
-        body {
-          font-family: 'Inter', sans-serif;
-          margin: 0;
-          padding: 40px;
-          background-color: #ffffff;
-          color: #333;
-        }
-        .header-image {
-          background: url('https://source.unsplash.com/featured/?linen,clothing') center/cover no-repeat;
-          height: 200px;
-          border-radius: 12px;
-          margin-bottom: 30px;
-        }
-        h1 {
-          color: #1a73e8;
-          font-size: 28px;
-        }
-        p {
-          font-size: 16px;
-          line-height: 1.7;
-        }
-        .footer {
-          margin-top: 30px;
-          font-size: 12px;
-          color: #aaa;
-          text-align: right;
-        }
-      </style>
-    </head>
-    <body>
-      <div class="header-image"></div>
-      <h1>Page ${pageNumber}</h1>
-      <p>${content.replace(/\n/g, '<br>')}</p>
-      <div class="footer">DayOnes • Page ${pageNumber}</div>
-    </body>
-  </html>
-  `;
+function generatePDF(doc, content, pageNumber) {
+    // Add a subtle background color (optional)
+    doc.rect(0, 0, doc.page.width, doc.page.height)
+        .fill('#ffffff');
+    // Add header image placeholder (colored rectangle for now)
+    doc.rect(57, 85, 498, 150) // A4 width - margins = 498
+        .fill('#f0f0f0')
+        .stroke('#ddd');
+    // Add "Image Placeholder" text in the rectangle
+    doc.fill('#999')
+        .fontSize(14)
+        .text('Header Image Placeholder', 57, 150, { align: 'center', width: 498 });
+    // Add main title
+    doc.fill('#1a73e8')
+        .fontSize(28)
+        .font('Helvetica-Bold')
+        .text(`Page ${pageNumber}`, 57, 270);
+    // Add main content
+    doc.fill('#333')
+        .fontSize(16)
+        .font('Helvetica')
+        .text(content, 57, 320, {
+        width: 498,
+        lineGap: 5,
+        align: 'left'
+    });
+    // Add footer
+    const footerY = doc.page.height - 100;
+    doc.fill('#aaa')
+        .fontSize(12)
+        .text(`DayOnes • Page ${pageNumber}`, 57, footerY, {
+        width: 498,
+        align: 'right'
+    });
 }
